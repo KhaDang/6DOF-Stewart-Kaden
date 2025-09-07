@@ -5,32 +5,54 @@
 #include <RMTMotorControl.h>
 #include <esp_task_wdt.h>
 
+#include <RCServos.h>
+#include <Wire.h>
+
+
 using namespace std;
 
 // Global variables
 Bounce2::Button debouncedEStop = Bounce2::Button();
 Preferences preferences;
 
-// Motor control variables
-RMTMotorControl* motors[6];
+// RMT Motor control variables
+
+// RMTMotorControl* motors[6];
+
+// RC Motors contol variables
+RCServos* rcmotors[6];
+
 volatile float arr[6] = {0, 0, 0, 0, 0, 0};
 static long servo_pos[6] = {0, 0, 0, 0, 0, 0};
 
+
+// Create PCA9685 driver (no init yet)
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40); // default I2C addr 0x40
+
 // GPIO pins for motors (using board-specific definitions)
-const gpio_num_t stepPins[6] = {
-    (gpio_num_t)STEP_PIN_1, (gpio_num_t)STEP_PIN_2, (gpio_num_t)STEP_PIN_3,
-    (gpio_num_t)STEP_PIN_4, (gpio_num_t)STEP_PIN_5, (gpio_num_t)STEP_PIN_6
-};
-const gpio_num_t dirPins[6] = {
-    (gpio_num_t)DIR_PIN_1, (gpio_num_t)DIR_PIN_2, (gpio_num_t)DIR_PIN_3,
-    (gpio_num_t)DIR_PIN_4, (gpio_num_t)DIR_PIN_5, (gpio_num_t)DIR_PIN_6
-};
+
+// const gpio_num_t stepPins[6] = {
+//     (gpio_num_t)STEP_PIN_1, (gpio_num_t)STEP_PIN_2, (gpio_num_t)STEP_PIN_3,
+//     (gpio_num_t)STEP_PIN_4, (gpio_num_t)STEP_PIN_5, (gpio_num_t)STEP_PIN_6
+// };
+// const gpio_num_t dirPins[6] = {
+//     (gpio_num_t)DIR_PIN_1, (gpio_num_t)DIR_PIN_2, (gpio_num_t)DIR_PIN_3,
+//     (gpio_num_t)DIR_PIN_4, (gpio_num_t)DIR_PIN_5, (gpio_num_t)DIR_PIN_6
+// };
+
 // ESP32-S3 has 4 TX channels (0-3) available for RMT
 // We'll use these for motors 0-3, and use direct GPIO for motors 4-5
-const rmt_channel_t channels[6] = {
-    RMT_CHANNEL_0, RMT_CHANNEL_1, RMT_CHANNEL_2, RMT_CHANNEL_3,
-    RMT_CHANNEL_0, RMT_CHANNEL_1  // Channel values for motors 4-5 not actually used
+
+// Config pins for rcmotors
+const uint8_t rcMotorPins[6]= {
+    1 , 2, 3, 4, 5 ,6
 };
+
+
+// const rmt_channel_t channels[6] = {
+//     RMT_CHANNEL_0, RMT_CHANNEL_1, RMT_CHANNEL_2, RMT_CHANNEL_3,
+//     RMT_CHANNEL_0, RMT_CHANNEL_1  // Channel values for motors 4-5 not actually used
+// };
 
 // Timing variables
 unsigned long currentMicros = 0;
@@ -50,11 +72,13 @@ void setupPWMpins();
 void handleStepDirection();
 void checkEStop();
 void process_data(char * data);
-void processIncomingByte(const byte inByte);
+void processIncomingByte(const uint8_t inByte);
 void InterfaceMonitorCode(void * pvParameters);
 void GPIOLoop(void * pvParameters);
 void EStopMonitorCode(void * pvParameters);
 void outputDebugData();  // New debug output function
+//Kaden added
+void setupRCpins();
 
 void setPos(){  
     //Platform and Base Coords
@@ -67,48 +91,70 @@ void setPos(){
         
         //set motor target position
         xSemaphoreTake(xMutex, portMAX_DELAY);
-        if (!motors[i]->setTargetPosition(x)) {
-            Serial.printf("Motor %d position error: %d\n", i, motors[i]->getLastError());
+        if (!rcmotors[i]->setTargetAngle(x)) {
+            Serial.printf("Motor %d position error: %d\n", i, rcmotors[i]->getLastError());
         }
         xSemaphoreGive(xMutex);
     }
 }
 
-void setupPWMpins() {
-    // Configure motor settings
-    RMTMotorControl::Config motorConfig;
-    motorConfig.stepPulseWidth_us = 2;      // 2µs pulse width for better reliability
-    motorConfig.dirSetupTime_us = 5;        // 5µs direction setup time for better reliability
-    motorConfig.minStepInterval_us = 5;     // 5µs minimum between steps (200kHz max)
-    motorConfig.maxStepRate = 200000;       // 200kHz max step rate for better reliability
-    motorConfig.maxAcceleration = 50000;    // 50k steps/sec^2 acceleration
-    motorConfig.enableSoftLimits = true;
-    motorConfig.softLimitMin = -100000;     // Adjust these limits based on your setup
-    motorConfig.softLimitMax = 100000;
+// void setupPWMpins() {
+//     // Configure motor settings
+//     RMTMotorControl::Config motorConfig;
+//     motorConfig.stepPulseWidth_us = 2;      // 2µs pulse width for better reliability
+//     motorConfig.dirSetupTime_us = 5;        // 5µs direction setup time for better reliability
+//     motorConfig.minStepInterval_us = 5;     // 5µs minimum between steps (200kHz max)
+//     motorConfig.maxStepRate = 200000;       // 200kHz max step rate for better reliability
+//     motorConfig.maxAcceleration = 50000;    // 50k steps/sec^2 acceleration
+//     motorConfig.enableSoftLimits = true;
+//     motorConfig.softLimitMin = -100000;     // Adjust these limits based on your setup
+//     motorConfig.softLimitMax = 100000;
 
-    // Initialize first 4 motors with RMT (unique channels 0-3)
-    for(int i = 0; i < 4; i++) {
-        motors[i] = new RMTMotorControl(stepPins[i], dirPins[i], channels[i]);
-        if (!motors[i]->begin(motorConfig)) {
-            Serial.printf("Failed to initialize motor %d with RMT, error: %d\n", i, motors[i]->getLastError());
-        } else {
-            Serial.printf("Successfully initialized motor %d with RMT channel %d\n", i, channels[i]);
-        }
-    }
+//     // Initialize first 4 motors with RMT (unique channels 0-3)
+//     for(int i = 0; i < 4; i++) {
+//         motors[i] = new RMTMotorControl(stepPins[i], dirPins[i], channels[i]);
+//         if (!motors[i]->begin(motorConfig)) {
+//             Serial.printf("Failed to initialize motor %d with RMT, error: %d\n", i, motors[i]->getLastError());
+//         } else {
+//             Serial.printf("Successfully initialized motor %d with RMT channel %d\n", i, channels[i]);
+//         }
+//     }
     
-    // For motors 4 & 5, configure GPIO pins directly for step/direction
-    for(int i = 4; i < 6; i++) {
-        // Configure GPIO pins for direct control
-        pinMode(stepPins[i], OUTPUT);
-        pinMode(dirPins[i], OUTPUT);
-        digitalWrite(stepPins[i], LOW);
-        digitalWrite(dirPins[i], LOW);
+//     // For motors 4 & 5, configure GPIO pins directly for step/direction
+//     for(int i = 4; i < 6; i++) {
+//         // Configure GPIO pins for direct control
+//         pinMode(stepPins[i], OUTPUT);
+//         pinMode(dirPins[i], OUTPUT);
+//         digitalWrite(stepPins[i], LOW);
+//         digitalWrite(dirPins[i], LOW);
         
-        // Create motor objects but mark them as special GPIO-only motors
-        motors[i] = new RMTMotorControl(stepPins[i], dirPins[i], RMT_CHANNEL_0); // Channel won't be used
-        motors[i]->beginGPIOOnly(); // Custom initialization for GPIO-only operation
+//         // Create motor objects but mark them as special GPIO-only motors
+//         motors[i] = new RMTMotorControl(stepPins[i], dirPins[i], RMT_CHANNEL_0); // Channel won't be used
+//         motors[i]->beginGPIOOnly(); // Custom initialization for GPIO-only operation
         
-        Serial.printf("Initialized motor %d with direct GPIO control\n", i);
+//         Serial.printf("Initialized motor %d with direct GPIO control\n", i);
+//     }
+// }
+
+void setupRCpins(){
+    // Motor configurations
+    RCServos:: Config motorConfig;
+    motorConfig.enableSoftLimits = true;
+    motorConfig.minAngle = 0;
+    motorConfig.maxAngle = 180;
+    motorConfig.maxVelocity = 90.0f;
+    motorConfig.updateInterval_ms = 20;
+
+    // Initialize 6 motors on channel 1-6
+    for (int i = 0; i < 6 ; i++){
+        // pinMode(rcMotorPins[i], OUTPUT); // This is wrong when using PCA9685
+        // digitalWrite(rcMotorPins[i], LOW);
+
+        // Init RCServos instances
+        rcmotors[i] = new RCServos(rcMotorPins[i], &pwm);
+        if (!rcmotors[i]->begin(motorConfig)){
+            Serial.println("Servo init failed!");
+        }
     }
 }
 
@@ -118,8 +164,8 @@ void handleStepDirection() {
     
     // Update each motor
     for (int i = 0; i < 6; i++) {
-        if (motors[i] && !motors[i]->update()) {
-            Serial.printf("Motor %d update error: %d\n", i, motors[i]->getLastError());
+        if (rcmotors[i] && !rcmotors[i]->update()) {
+            Serial.printf("Motor %d update error: %d\n", i, rcmotors[i]->getLastError());
         }
     }
     
@@ -128,6 +174,9 @@ void handleStepDirection() {
 }
 
 void loop() {
+    
+    esp_task_wdt_reset();  // prevent watchdog reset
+
     checkEStop();
 }
 
@@ -170,7 +219,9 @@ void GPIOLoop(void * pvParameters) {
 
 void EStopMonitorCode(void * pvParameters) {
     TickType_t xLastWakeTime = xTaskGetTickCount();
-    
+
+    esp_task_wdt_add(NULL);  // Register with watchdog THIS IS IMPORTANT WATCH DOG WILL COMPLAIN WITHOUT THIS REGISTER
+
     for(;;) {
         // Update watchdog to indicate E-stop monitoring is alive
         esp_task_wdt_reset();
@@ -180,11 +231,11 @@ void EStopMonitorCode(void * pvParameters) {
         
         if (debouncedEStop.fell()) {  // Button pressed (transition to active state)
             // Immediately disable all motor outputs
-            for(int i = 0; i < 6; i++) {
-                if (motors[i]) {
-                    motors[i]->emergencyStop();
-                }
-            }
+            // for(int i = 0; i < 6; i++) {
+            //     if (rcmotors[i]) {
+            //         motors[i]->emergencyStop();
+            //     }
+            // }
             isPausedEStop = true;
             
             // Log E-stop activation
@@ -300,7 +351,7 @@ void process_data(char * data) {
     }
 }
 
-void processIncomingByte(const byte inByte) {
+void processIncomingByte(const uint8_t inByte) {
     static char input_line[MAX_SERIAL_INPUT];
     static unsigned int input_pos = 0;
     static unsigned long lastMessageTime = 0;
@@ -333,10 +384,21 @@ void setup() {
  
   Serial.begin(115200); 
   Serial.println("Starting up...");
+
+  Wire.begin(21, 22); // SDA=21, SCL=22 for ESP32-DevKit
+  pwm.begin();
+  pwm.setPWMFreq(50);
+
+
+  esp_task_wdt_config_t wdt_config = {
+    .timeout_ms = WDT_TIMEOUT_MS,
+    .trigger_panic = true
+  };
   
   // Initialize watchdog first
-  esp_task_wdt_init(WDT_TIMEOUT_MS / 1000.0, true); // 3 second timeout, panic on timeout
+  esp_task_wdt_init(&wdt_config); // 3 second timeout, panic on timeout
   
+  esp_task_wdt_add(NULL);  // Register the Arduino loopTask
 
   // Configure E-Stop button with debouncing
   pinMode(ESTOP_PIN, INPUT_PULLUP);
@@ -345,7 +407,9 @@ void setup() {
   debouncedEStop.setPressedState(ESTOP_ACTIVE_STATE);
   
   // Initialize motor control pins
-  setupPWMpins();
+    //setupPWMpins();
+    // Kaden modifications
+    setupRCpins();
   
   // Create mutex for thread safety
   xMutex = xSemaphoreCreateMutex();
