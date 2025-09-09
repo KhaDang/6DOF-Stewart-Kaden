@@ -2,6 +2,7 @@
 #include <Bounce2.h>
 #include <Preferences.h>
 #include "helpers.h"
+#include <InverseKinematics.h>
 #include <RMTMotorControl.h>
 #include <esp_task_wdt.h>
 
@@ -14,7 +15,7 @@ using namespace std;
 // Global variables
 Bounce2::Button debouncedEStop = Bounce2::Button();
 Preferences preferences;
-
+#define LED 2
 // RMT Motor control variables
 
 // RMTMotorControl* motors[6];
@@ -27,7 +28,7 @@ static long servo_pos[6] = {0, 0, 0, 0, 0, 0};
 
 
 // Create PCA9685 driver (no init yet)
-Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(0x40); // default I2C addr 0x40
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(); // default I2C addr 0x40
 
 // GPIO pins for motors (using board-specific definitions)
 
@@ -79,21 +80,34 @@ void EStopMonitorCode(void * pvParameters);
 void outputDebugData();  // New debug output function
 //Kaden added
 void setupRCpins();
+void blinkLED();
+
+
+void blinkLED(){
+    delay(100);
+    digitalWrite(LED,HIGH);
+    delay(100);
+    digitalWrite(LED,LOW);
+}
 
 void setPos(){  
     //Platform and Base Coords
     for(int i = 0; i < 6; i++) {    
         long x = 0;
         float alpha = getAlpha(i,arr);
+
+        // Serial.print("Calculated angle: "); Serial.println(alpha);
         
         //convert to steps
-        x = alpha * STEPS_PER_DEGREE;
+        // x = alpha * STEPS_PER_DEGREE;
         
-        //set motor target position
+        //set motor target position, lock access to motor array
         xSemaphoreTake(xMutex, portMAX_DELAY);
-        if (!rcmotors[i]->setTargetAngle(x)) {
+        // NEED TO CHECK THE EQUATIONS OF getAlpha, the output values too small
+        if (!rcmotors[i]->setTargetAngle(100 * alpha + 90.0f)) {
             Serial.printf("Motor %d position error: %d\n", i, rcmotors[i]->getLastError());
         }
+        // blinkLED();
         xSemaphoreGive(xMutex);
     }
 }
@@ -164,7 +178,9 @@ void handleStepDirection() {
     
     // Update each motor
     for (int i = 0; i < 6; i++) {
-        if (rcmotors[i] && !rcmotors[i]->update()) {
+        // Serial.print("Motor: "); Serial.println(i);
+
+        if (!rcmotors[i]->update()) {
             Serial.printf("Motor %d update error: %d\n", i, rcmotors[i]->getLastError());
         }
     }
@@ -198,6 +214,7 @@ void GPIOLoop(void * pvParameters) {
     for(;;) {
         // Reset watchdog
         esp_task_wdt_reset();
+
         
         currentMicros = micros();
         
@@ -207,11 +224,10 @@ void GPIOLoop(void * pvParameters) {
             
             // Only output debug data every 100ms
             if (currentMicros - lastDebugOutput >= DEBUG_OUTPUT_INTERVAL) {
-                outputDebugData();
+                // outputDebugData();
                 lastDebugOutput = currentMicros;
             }
         }
-        
         // Use vTaskDelayUntil for more precise timing
         vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(1));
     }
@@ -287,6 +303,7 @@ void process_data(char * data) {
     
     // Debug output - show received data
     Serial.print("Received data: ");
+    
     Serial.println(data);
     
     tok = strtok(data, ",");
@@ -295,11 +312,11 @@ void process_data(char * data) {
         float value = atof(tok);
         
         if(i == 2)
-            temp = mapfloat(value, 0, 4094, -7, 7);//hieve 
+            temp = mapfloat(value, 0, 4096, -30, 30);//hieve 
         else if(i > 2)//rotations, pitch,roll,yaw
-            temp = mapfloat(value, 0, 4094, -30, 30) * (PI/180.0);
+            temp = mapfloat(value, 0, 4096, -30, 30) * (PI/180.0);
         else//sway,surge
-            temp = mapfloat(value, 0, 4094, -8, 8); 
+            temp = mapfloat(value, 0, 4096, -30, 8); 
         
         arrRaw[i] = temp;
         
@@ -384,11 +401,12 @@ void setup() {
  
   Serial.begin(115200); 
   Serial.println("Starting up...");
-
+  
   Wire.begin(21, 22); // SDA=21, SCL=22 for ESP32-DevKit
   pwm.begin();
   pwm.setPWMFreq(50);
 
+  pinMode(LED,OUTPUT);
 
   esp_task_wdt_config_t wdt_config = {
     .timeout_ms = WDT_TIMEOUT_MS,
@@ -463,9 +481,10 @@ void outputDebugData() {
             Serial.printf("%.2f,", arr[i]);
         }
         
-        // Output target position and rotation (placeholder values for now)
-        Serial.printf("%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
-                     0.0f, 0.0f, 0.0f,  // X, Y, Z
-                     0.0f, 0.0f, 0.0f); // rotX, rotY, rotZ
+        // // Output target position and rotation (placeholder values for now)
+        // Serial.printf("%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
+        //              0.0f, 0.0f, 0.0f,  // X, Y, Z
+        //              0.0f, 0.0f, 0.0f); // rotX, rotY, rotZ
     }
 }
+

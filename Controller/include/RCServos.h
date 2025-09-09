@@ -18,7 +18,7 @@ public:
 
         int minAngle = 0;           // Minimum angle (deg)
         int maxAngle = 180;         // Maximum angle (deg)
-        float maxVelocity = 90.0f;  // Maximum speed (deg/sec)
+        float maxVelocity = 10.0f;  // Maximum speed (deg/sec)
         uint32_t updateInterval_ms = 20; // Servo refresh rate (~50 Hz)
     };
     // Constructor- initializes motor pins and default state
@@ -26,14 +26,14 @@ public:
         _channel(channel),
         _pwm(driver),
         _attached(false),
-        _error(ERROR_NOT_INITIALIZED),
-        _currentAngle(0.0f),
-        _targetAngle(0.0f),
+        _error(ERROR_NONE),
+        _currentAngle(90.0f),
+        _targetAngle(90.0f),
         _lastUpdate(0) {}
 
     // Initialize the servo
     bool begin(const Config& cfg) {
-        _config = cfg;
+     
         if (!_pwm) {  // Instance of Adafruit_PWMServo
             _error = ERROR_NOT_ATTACHED;
             return false;
@@ -41,7 +41,7 @@ public:
         _config = cfg;
         _pwm->begin();
         _pwm->setPWMFreq(50);
-
+        // _pwm->setOscillatorFrequency(2700000); //2.7 kHz
         _attached = true;
         _error = ERROR_NONE;
         return true;
@@ -49,6 +49,9 @@ public:
 
     // Set new target angle
     bool setTargetAngle(float angle) {
+
+        Serial.print("Target angle: "); Serial.println(angle);
+
         if (!_attached) {
             _error = ERROR_NOT_ATTACHED;
             return false;
@@ -58,6 +61,7 @@ public:
             return false;
         }
         _targetAngle = angle;
+        
         return true;
     }
 
@@ -71,27 +75,41 @@ public:
         uint32_t now = millis();
         uint32_t dt = now - _lastUpdate;
 
+
         if (dt < _config.updateInterval_ms) {
             return true; // too soon, wait until refresh interval
         }
         _lastUpdate = now;
 
         float delta = _targetAngle - _currentAngle;
+
+        // Serial.printf("Motor %d properties:\n",_channel);
+        // Serial.printf("target angle: %.2f\n", _targetAngle);
+        // Serial.printf("Current angle: %.2f\n", _currentAngle);
+        // Serial.printf("deta value: %.2f\n", delta);
+
+        // delay(5000);
+
         if (fabs(delta) < 0.01f) {
             return true; // already at target
         }
 
         // Compute how much we can move in this interval
-        float step = _config.maxVelocity * (dt / 1000.0f); // deg = deg/s * s
-        if (fabs(delta) <= step) {
-            _currentAngle = _targetAngle; // reach target
+       float maxStep = _config.maxVelocity * (_config.updateInterval_ms / 1000.0f);
+        if (fabs(delta) > maxStep) {
+            _currentAngle += (delta > 0 ? maxStep : -maxStep);
         } else {
-            _currentAngle += (delta > 0 ? step : -step); // move toward target
+            _currentAngle = _targetAngle;
         }
 
-        // Convert angle to PCA9685 pulse
-        uint16_t pulse = angleToPulse(_currentAngle);
-        _pwm->setPWM(_channel, 0, pulse);
+        // Convert angle to PCA9685 pulse, micro seconds
+        double micro_second = map(_currentAngle, 0 ,179, 600, 2400);
+
+        _pwm->writeMicroseconds(_channel, micro_second);
+        // delay(1000);
+        Serial.printf("MOTOR: %d POSITION GETTING UPDATED \n", _channel);
+        Serial.printf("Microsecond written to motor %f \n", micro_second);
+
         return true;
     }
 
@@ -101,11 +119,6 @@ public:
     float getTargetAngle() const { return _targetAngle; }
 
 private:
-
-    uint16_t angleToPulse(float angle) {
-    // Map [0,180] deg to [150,600] ticks (approx for SG90, MG996R etc.)
-    return map((int)angle, 0, 180, 150, 600);
-    }
 
     uint8_t _channel;
     Adafruit_PWMServoDriver* _pwm;

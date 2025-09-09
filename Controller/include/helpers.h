@@ -54,10 +54,10 @@
 static float theta_r = 10;
 static float theta_s[6]={150,-90,30, 150,-90,30};
 static float theta_p = 30;
-static float RD = 15.75;
-static float PD = 16;
-static float ServoArmLengthL1 = 7.25;
-static float ConnectingArmLengthL2 = 28.5;
+static float RD = 300;
+static float PD = 250;
+static float ServoArmLengthL1 = 150;
+static float ConnectingArmLengthL2 = 150;
 static float platformHeight = 25.5170749;
 
 // Servo Configuration
