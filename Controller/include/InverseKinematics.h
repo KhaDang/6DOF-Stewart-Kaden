@@ -50,6 +50,15 @@ void calculateAllServoAngles(const float position[6], const StewartConfig* confi
  * 
  * @param config Pointer to the configuration structure to initialize
  */
+
+bool actuatorReachable(float d, float L1, float L2);
+/**
+ * Check whether the input data could reachable
+ * 
+ * @param d Distance between the base and the platform
+ * @param L1 Config servo arm, first lenght of triangle
+ * @param L2 Config lenght of rob, sencond length of triangle
+ */
 void initDefaultStewartConfig(StewartConfig* config);
 
 #ifdef __cplusplus

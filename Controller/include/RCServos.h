@@ -18,7 +18,7 @@ public:
 
         int minAngle = 0;           // Minimum angle (deg)
         int maxAngle = 180;         // Maximum angle (deg)
-        float maxVelocity = 10.0f;  // Maximum speed (deg/sec)
+        float maxVelocity = 90.0f;  // Maximum speed (deg/sec)
         uint32_t updateInterval_ms = 20; // Servo refresh rate (~50 Hz)
     };
     // Constructor- initializes motor pins and default state
@@ -90,7 +90,7 @@ public:
 
         // delay(5000);
 
-        if (fabs(delta) < 0.01f) {
+        if (fabs(delta) < 1.8f) {
             return true; // already at target
         }
 
@@ -107,8 +107,8 @@ public:
 
         _pwm->writeMicroseconds(_channel, micro_second);
         // delay(1000);
-        Serial.printf("MOTOR: %d POSITION GETTING UPDATED \n", _channel);
-        Serial.printf("Microsecond written to motor %f \n", micro_second);
+        // Serial.printf("MOTOR: %d POSITION GETTING UPDATED \n", _channel);
+        // Serial.printf("Microsecond written to motor %f \n", micro_second);
 
         return true;
     }

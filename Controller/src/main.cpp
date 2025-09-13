@@ -2,7 +2,7 @@
 #include <Bounce2.h>
 #include <Preferences.h>
 #include "helpers.h"
-#include <InverseKinematics.h>
+#include "InverseKinematics.h"
 #include <RMTMotorControl.h>
 #include <esp_task_wdt.h>
 
@@ -25,6 +25,10 @@ RCServos* rcmotors[6];
 
 volatile float arr[6] = {0, 0, 0, 0, 0, 0};
 static long servo_pos[6] = {0, 0, 0, 0, 0, 0};
+
+
+// Allocate memory for struct StewartConfig
+StewartConfig cfg;
 
 
 // Create PCA9685 driver (no init yet)
@@ -93,18 +97,17 @@ void blinkLED(){
 void setPos(){  
     //Platform and Base Coords
     for(int i = 0; i < 6; i++) {    
-        long x = 0;
-        float alpha = getAlpha(i,arr);
-
-        // Serial.print("Calculated angle: "); Serial.println(alpha);
+        float x = 0;
+        float alpha = calculateServoAngle(i, (const float*)arr, &cfg);
         
-        //convert to steps
-        // x = alpha * STEPS_PER_DEGREE;
+        //Need to convert alpha to degree, then map this to the motor specs
+        x = alpha * RAD_TO_DEG;
         
         //set motor target position, lock access to motor array
         xSemaphoreTake(xMutex, portMAX_DELAY);
         // NEED TO CHECK THE EQUATIONS OF getAlpha, the output values too small
-        if (!rcmotors[i]->setTargetAngle(100 * alpha + 90.0f)) {
+        // OFFSET THE CALCULATED ANLGE 90 DEG TO GET NON NEGATIVE ANGLE
+        if (!rcmotors[i]->setTargetAngle(x + 90.0f)) {
             Serial.printf("Motor %d position error: %d\n", i, rcmotors[i]->getLastError());
         }
         // blinkLED();
@@ -312,11 +315,11 @@ void process_data(char * data) {
         float value = atof(tok);
         
         if(i == 2)
-            temp = mapfloat(value, 0, 4096, -30, 30);//hieve 
+            temp = mapfloat(value, 0, 4096, -7, 7);//hieve 
         else if(i > 2)//rotations, pitch,roll,yaw
             temp = mapfloat(value, 0, 4096, -30, 30) * (PI/180.0);
         else//sway,surge
-            temp = mapfloat(value, 0, 4096, -30, 8); 
+            temp = mapfloat(value, 0, 4096, -5, 5); 
         
         arrRaw[i] = temp;
         
@@ -401,6 +404,8 @@ void setup() {
  
   Serial.begin(115200); 
   Serial.println("Starting up...");
+
+    initDefaultStewartConfig(&cfg);         // initialize the config with default values
   
   Wire.begin(21, 22); // SDA=21, SCL=22 for ESP32-DevKit
   pwm.begin();

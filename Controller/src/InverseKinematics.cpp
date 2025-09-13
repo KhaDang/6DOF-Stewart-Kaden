@@ -1,10 +1,13 @@
 #include "InverseKinematics.h"
+#include <Arduino.h>
+
 
 // Helper macro to convert degrees to radians
 #define radians(deg) ((deg)*IK_DEG_TO_RAD)
 
 /**
  * Calculate servo angle for a specific servo based on platform position and orientation
+ * Angle will be returned in radian
  */
 float calculateServoAngle(int servoIndex, const float position[6], const StewartConfig* config) {
     // Arrays for platform & base coordinates calculation
@@ -61,11 +64,22 @@ float calculateServoAngle(int servoIndex, const float position[6], const Stewart
     
     deltaL2Virtual = sqrt(pow(deltaLx, 2.0) + pow(deltaLy, 2.0) + pow(deltaLz, 2.0));
 
+    if (!actuatorReachable(deltaL2Virtual, config->ServoArmLengthL1, config->ConnectingArmLengthL2)) {
+    // Not reachable — log useful diagnostics and return NAN or a safe fallback
+    Serial.printf("Unreachable: d=%.3f, L1=%.3f, L2=%.3f\n", deltaL2Virtual, config->ServoArmLengthL1, config->ConnectingArmLengthL2);
+    return NAN;
+}
+
     // Calculate servo angle using inverse kinematics
     l = pow(deltaL2Virtual, 2.0) - (pow(config->ConnectingArmLengthL2, 2.0) - pow(config->ServoArmLengthL1, 2.0));
+    Serial.printf("the value of l: %.2f", l);
+
     m = 2 * config->ServoArmLengthL1 * (platformPivotz);
+    Serial.printf("the value of m: %.2f", m);
+    
     n = 2 * config->ServoArmLengthL1 * (cos(config->theta_s[servoIndex] * IK_PI/180) * (platformPivotx - baseCoordsx) + 
                                      sin(config->theta_s[servoIndex] * IK_PI/180) * (platformPivoty - baseCoordsy));
+    Serial.printf("the value of n: %.2f", n);
 
     return asin(l / (sqrt(pow(m, 2.0) + pow(n, 2.0)))) - atan(n / m);
 }
@@ -89,7 +103,7 @@ void calculateAllServoAngles(const float position[6], const StewartConfig* confi
  * Initialize a StewartConfig structure with default values
  */
 void initDefaultStewartConfig(StewartConfig* config) {
-    if (config == NULL) {
+    if (config == nullptr) {
         return;
     }
     
@@ -107,4 +121,10 @@ void initDefaultStewartConfig(StewartConfig* config) {
     config->ServoArmLengthL1 = 7.25f;
     config->ConnectingArmLengthL2 = 28.5f;
     config->platformHeight = 25.5170749f;
+}
+
+bool actuatorReachable(float d, float L1, float L2) {
+    float minD = fabs(L2 - L1);
+    float maxD = L1 + L2;
+    return (d >= minD) && (d <= maxD);
 }
